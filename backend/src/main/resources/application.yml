@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: sales-analysis
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/sales_analysis?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:sales}
+    password: ${DB_PASSWORD:sales-dev-password}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:redis-dev-password}
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+  ai:
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY:disabled}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:local-development-secret-change-before-production}
+    ttl: PT2H
+  bootstrap-admin:
+    username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:admin123!}
+  cors-origin: ${CORS_ORIGIN:http://localhost:5173}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

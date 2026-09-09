@@ -1,0 +1,16 @@
+:root { font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; color: #172033; background: #f4f7fb; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+.shell { min-height: 100vh; }
+.sidebar { background: #fff; border-right: 1px solid #e8edf4; }
+.sidebar-title { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 20px; font-weight: 700; }
+.sidebar .el-menu { border-right: 0; }
+.topbar { display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #e8edf4; }
+.brand-mark { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #375dfb, #7c4dff); font-weight: 800; }
+.brand-mark.small { width: 32px; height: 32px; border-radius: 9px; font-size: 12px; }
+.login-page { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at top left, #e9efff, #f8faff 45%, #edf3ff); }
+.login-panel { width: 420px; padding: 42px; border-radius: 20px; background: rgba(255,255,255,.94); box-shadow: 0 24px 80px rgba(40,64,120,.15); }
+.login-panel h1 { margin: 22px 0 8px; }
+.login-panel p, .muted, .metric-label { color: #718096; }
+.login-panel .el-button { width: 100%; }
+.metric-value { margin-top: 12px; font-size: 28px; font-weight: 700; }

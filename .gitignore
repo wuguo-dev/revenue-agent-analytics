@@ -1,0 +1,19 @@
+# Java
+backend/target/
+backend/.m2/
+*.log
+
+# Node
+frontend/node_modules/
+frontend/.npm-cache/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+
+# IDE / local
+.idea/
+.vscode/
+*.iml
+.env
+uploads/
+.planning/
