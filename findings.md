@@ -35,3 +35,5 @@
 - 当前 `main` 分支已有三次历史提交，`origin` 指向目标 GitHub 仓库，但本地分支尚未显示上游跟踪关系。
 - 当前 HEAD 已删除未评审的后端骨架和 `frontend/index.html`，仓库不是可运行项目；旧 README 的本地启动说明已失效。
 - GitHub CLI 中 `wuguo-dev` 的已保存令牌失效；项目文件扫描未发现 GitHub、OpenAI 或 DashScope 实际密钥。
+- 目标仓库公开后可匿名读取；远程 `main` 只有一个独立的 `Initial commit` 和两行 README，与本地历史没有共同祖先。
+- 远程 README 提到每日日报、周报和库存警戒通知；该愿景已合并进新版 README，但具体频率、阈值、通知渠道和首版范围仍需业务评审。
