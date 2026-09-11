@@ -1,19 +1,74 @@
 # 多 Agent 协作销售分析系统
 
-面向内部零售运营的销售、库存与 AI 分析平台。项目采用 Spring Boot + Vue 3 的前后端分离模块化单体架构。
+面向内部零售运营的销售分析平台，计划通过 POP 商品资料与每日商品销售汇总，提供商品目录、门店库存、销售分析、冷热商品分析，以及管理员专用的多 Agent 协作分析能力。
 
-## 目录
+> 当前状态：**P0 计划与接口评审阶段**。业务数据库字段、建表 SQL 和模块接口尚未最终确认；仓库当前不是可运行成品，请勿据此部署生产环境。
 
-- `backend`：REST API、Excel 导入、库存销售领域逻辑、Agent 工作流
-- `frontend`：管理员工作台与普通用户商品目录
-- `deploy`：本地 MySQL/Redis 编排与环境变量示例
-- `docs`：实施计划、接口和数据字典
+## 当前工作原则
 
-## 本地启动
+项目采用“计划确认 → 分模块接口评审 → 数据模型评审 → 后端接口与测试 → 对应前端页面 → 浏览器联调验收”的垂直切片方式开发。
 
-1. 复制 `deploy/.env.example` 为 `deploy/.env` 并设置初始管理员密码与 DashScope Key。
-2. 在 `deploy` 目录运行 `docker compose up -d mysql redis`。
-3. 在 `backend` 目录运行 `mvn spring-boot:run`。
-4. 在 `frontend` 目录运行 `npm install && npm run dev`。
+- 在总体计划和字段模型确认前，不创建正式业务表或 Flyway 迁移。
+- 总体计划定稿后，将 M01–M10 分别生成独立接口文档。
+- 每个后端功能必须同步实现对应前端页面，并通过真实接口进行浏览器测试。
+- 当前仓库中的前端文件仅为早期界面草案；后端工程已从未评审草案中移除。
 
-默认前端地址为 `http://localhost:5173`，后端接口为 `http://localhost:8080/api/v1`。
+## 已确认的核心业务规则
+
+- 系统包含管理员和普通用户；普通用户唯一绑定一个门店。
+- 普通用户可查看所属门店的条形码、供应商、商品名称、规格、单位、分类、售价、状态、最新已知库存及同步时间。
+- 普通用户可为所属门店导入每日销售汇总并查看本店导入批次，但不能查看销售金额、成本、利润、毛利率、其他门店库存或 AI 功能。
+- 商品与供应商为多对多关系；供应商用于展示商品来源，不作为销售分析维度。
+- 商品当前条码全局唯一，按 1–64 位数字或英文字母字符串保存并保留前导零；管理员可修改，普通用户不可修改。
+- POP 中商品和库存数据完整，POP 库存是本系统唯一权威库存来源。
+- 商品资料可以分多个批次逐步同步到本系统；每批只新增或更新出现的条码，批次外商品保持不变。
+- 已有商品采用非空覆盖：空单元格保留旧值，有效非空值才覆盖；空值不表示清空或写零。
+- 商品资料和每日销售文件中的有效库存值直接覆盖对应门店商品库存，不使用销量推算库存。
+- 每日销售导入前必须选择营业日期；单次销售查询日期跨度最长一个月。
+- 多 Agent 分析仅管理员可用，Agent 只能调用预定义的聚合查询工具，不能执行自由 SQL。
+
+## 计划技术栈
+
+- 后端：Java 17、Spring Boot 3.5.8、Spring AI Alibaba 1.1.2.2、Spring AI 1.1.2、MyBatis-Plus、Spring Security、Flyway、Apache POI。
+- 前端：Vue 3、TypeScript、Vite、Pinia、Vue Router、Element Plus、ECharts、Axios。
+- 数据与基础设施：MySQL、Redis、Elasticsearch；生产环境计划切换阿里云 RDS MySQL、Redis 和 Elasticsearch 服务。
+- AI 模型：阿里云百炼 Qwen，通过 DashScope 接入。
+
+## 仓库目录
+
+```text
+frontend/       早期前端界面草案，尚未进入正式功能开发
+deploy/         MySQL、Redis 的本地编排与环境变量示例
+docs/           计划、接口清单、字段评审、库存方案和架构决策
+CONTEXT.md      项目领域术语
+task_plan.md    阶段状态与实施门禁
+findings.md     已确认业务发现
+progress.md     规划过程记录
+```
+
+后端工程将在计划、模块接口和数据模型完成评审后，按确认结果创建。
+
+## 规划文档
+
+- [总体实施计划](docs/implementation-plan.md)
+- [接口清单评审稿](docs/api-contract.md)
+- [POP 源表字段评审](docs/source-field-review.md)
+- [POP 权威库存方案](docs/inventory-source-assessment.md)
+- [数据字典初稿](docs/data-dictionary.md)
+- [领域术语](CONTEXT.md)
+- [ADR：POP 是库存的唯一权威来源](docs/adr/0001-pop-authoritative-inventory.md)
+
+`docs/api-contract.md` 当前只是拆分前的接口总清单。总体计划定稿后，将在 `docs/api/` 中按业务模块生成独立、完整的接口文档。
+
+## 后续节点
+
+1. 完成总体实施计划评审并标记为 `APPROVED`。
+2. 生成并评审 M01–M10 独立接口文档。
+3. 确认 POP 字段取舍、业务口径、ER 图、索引、外键和建表 SQL。
+4. 经用户确认后创建数据库迁移和正式后端工程。
+5. 按模块同步交付后端接口、前端页面和浏览器联调测试。
+
+## 安全说明
+
+- 不要提交 `.env`、访问令牌、数据库密码、JWT 密钥或 DashScope API Key。
+- `deploy/.env.example` 只提供变量名和示例占位值，实际密钥应通过本地环境或部署平台注入。
