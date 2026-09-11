@@ -37,3 +37,4 @@
 - GitHub CLI 中 `wuguo-dev` 的已保存令牌失效；项目文件扫描未发现 GitHub、OpenAI 或 DashScope 实际密钥。
 - 目标仓库公开后可匿名读取；远程 `main` 只有一个独立的 `Initial commit` 和两行 README，与本地历史没有共同祖先。
 - 远程 README 提到每日日报、周报和库存警戒通知；该愿景已合并进新版 README，但具体频率、阈值、通知渠道和首版范围仍需业务评审。
+- 本机已有 SSH 密钥且成功认证为 GitHub 账号 `wuguo-dev`；`origin` 已切换为 `git@github.com:wuguo-dev/revenue-agent-analytics.git`。
