@@ -9,7 +9,7 @@
 - 基础路径：`/api/v1`；健康检查保留 Actuator 原路径。
 - 认证：`Authorization: Bearer <accessToken>`。
 - 时间：ISO-8601，业务时区 `Asia/Shanghai`。
-- 金额：十进制定点数，JSON 中使用数字；最终精度由 G1 字段评审确定。商品供应商价格与销售成本快照分开保存。
+- 金额：十进制定点数，JSON 中使用数字；最终精度由 G1 字段评审确定。门店商品供应商价格与销售成本快照分开保存。
 - 数量：允许小数，暂按三位小数设计，最终由 G1 确认。
 - 条形码：始终作为字符串传输，禁止前后端转换为数字。
 - 删除：业务主数据默认不物理删除，使用状态停用；未提交导入批次可以放弃。
@@ -95,7 +95,8 @@ inventory: { quantity, sourceType, sourceDate, lastSyncedAt } | null
 ### ProductAdminView `[G1]`
 
 ```text
-id, barcode, name, suppliers[{ id, name, currentPurchasePrice }],
+id, barcode, name,
+storeSuppliers[{ storeId, storeName, supplierId, supplierName, currentPurchasePrice, purchasePriceSourceDate, status }],
 specification, unit, category, status,
 storePrices[{ storeId, storeName, salePrice, priceSourceDate, version }],
 storeInventories[{ storeId, storeName, quantity, sourceDate, lastSyncedAt }],
@@ -168,13 +169,13 @@ title, xAxis[], series[{ name, data[] }], columns[], rows[]
 |---|---|---|---|---|
 | API-030 | `GET /catalog/products` | USER_CATALOG | `keyword, supplierId, categoryId, status, page, size` | `ProductPublicView` 分页；分类包含 `id,name,status,path`，普通用户自动限定自身门店并返回该店当前售价及最新已知库存 |
 | API-031 | `GET /catalog/products/{id}` | USER_CATALOG | 路径 ID | `ProductPublicView`；分类包含停用状态，只返回所属门店当前售价及最新已知库存，不属于门店则 404 |
-| API-032 | `GET /admin/products` | ADMIN | `keyword, barcode, supplierId, categoryId, status, storeId?, page, size` | `ProductAdminView` 分页；包含当前分类、各门店当前售价及来源日期摘要，不默认返回销售汇总 |
-| API-033 | `GET /admin/products/{id}` | ADMIN | 路径 ID | 管理员商品详情、当前分类、各门店当前售价、售价来源日期及货位，不默认返回销售汇总 |
+| API-032 | `GET /admin/products` | ADMIN | `keyword, barcode, supplierId, categoryId, status, storeId?, page, size` | `ProductAdminView` 分页；包含当前分类、各门店当前售价及按门店拆分的供应商当前进价摘要，不默认返回销售汇总 |
+| API-033 | `GET /admin/products/{id}` | ADMIN | 路径 ID | 管理员商品详情、当前分类、各门店当前售价、各门店供应商当前进价、售价/进价来源日期及货位，不默认返回销售汇总 |
 | API-034 | `POST /admin/products` | ADMIN | `ProductAdminWrite`，含 `categoryId` `[G1]` | 新商品；`categoryId` 必须指向叶子分类 |
 | API-035 | `PUT /admin/products/{id}` | ADMIN | `ProductAdminWrite`，含 `barcode, categoryId, version` `[G1]` | 更新商品；允许受控修改条码，`categoryId` 必须指向叶子分类 |
 | API-036 | `PUT /admin/products/{id}/status` | ADMIN | `status` | 启用/停用，不删除历史销售 |
-| API-037 | `GET /admin/products/{id}/suppliers` | ADMIN | 路径 ID | 商品的全部供应商关系及 `currentPurchasePrice, purchasePriceSourceDate` `[G1]`；不返回历史列表 |
-| API-038 | `PUT /admin/products/{id}/suppliers` | ADMIN | `suppliers[{supplierId,currentPurchasePrice,status}]` `[G1]` | 整体更新商品供应商关系及最新进价；不保存历次进价，不改历史销售快照，不写业务审计 |
+| API-037 | `GET /admin/stores/{storeId}/products/{productId}/suppliers` | ADMIN | 门店 ID、商品 ID | 指定门店商品的全部供应商关系及 `currentPurchasePrice, purchasePriceSourceDate` `[G1]`；不返回其他门店或历史列表 |
+| API-038 | `PUT /admin/stores/{storeId}/products/{productId}/suppliers` | ADMIN | `suppliers[{supplierId,currentPurchasePrice,status,version}]` `[G1]` | 整体更新指定“门店 + 商品”的供应商关系及最新进价；不影响其他门店，不保存历次进价，不改历史销售快照，不写业务审计 |
 | API-039 | `PUT /admin/stores/{storeId}/products/{productId}/price` | ADMIN | `salePrice, version` `[G1]`；无日期字段 | 更新指定门店商品当前售价；返回 `salePrice, priceSourceDate, updatedAt, version`，不影响其他门店及历史销售快照 |
 
 ### 6.2 供应商与多级分类
@@ -193,11 +194,11 @@ title, xAxis[], series[{ name, data[] }], columns[], rows[]
 
 分类采用全系统共享的父子层级模型，不包含 `storeId`，根分类的 `parentId` 为空且 `level=1`，最大允许 `level=5`。商品只能直接关联没有子分类的叶子分类，分类不得同时直接关联商品并拥有子分类。普通用户和管理员均可以创建分类并调整父级归属；只有管理员可以重命名、启用或停用分类，普通用户调用 API-047/API-057 返回 403。任何父级调整都必须阻止自引用和循环引用；API-045 创建结果超过第 5 级，或 API-046 移动后目标父级深度加被移动子树高度超过 5 时，返回 409 `CATEGORY_DEPTH_EXCEEDED`。在已有直接关联商品的分类下创建或移入子分类时返回 409 `CATEGORY_PARENT_HAS_PRODUCTS`；API-034/API-035 将商品关联至非叶子分类时返回 409 `PRODUCT_CATEGORY_NOT_LEAF`。上述失败均不得改变原分类树或商品关联。
 
-API-057 停用分类时，即使存在直接或间接关联商品也允许提交；不得改变商品 `status` 或当前 `categoryId`。API-030 至 API-033 继续返回这些商品，并在分类对象中返回 `status=DISABLED` 供前端展示停用标记；ES 索引中的商品保持可检索，只同步分类状态。停用分类不得作为 API-034/API-035 的目标，重新启用后可再次选择。首次进入系统的新商品匹配到停用 POP 分类时的行为仍待确认。
+API-057 停用系统分类时，即使存在直接或间接关联商品也允许提交；不得改变商品 `status` 或当前 `categoryId`。API-030 至 API-033 继续返回这些商品，并在分类对象中返回 `status=DISABLED` 供前端展示停用标记；ES 索引中的商品保持可检索，只同步分类状态。停用分类不得作为 API-034/API-035 的目标，重新启用后可再次选择。POP 源端不会停用分类，API-067 不接收 POP 分类状态，也不设计“新商品命中已停用 POP 分类”的阻断、重启或自动迁移分支。
 
 分类记录来源分为 `POP_IMPORT` 和 `MANUAL`。`POP_IMPORT` 类别必须有 `popCode`，且 `popCode` 在全系统唯一，API-067 只按该编码匹配类别；`MANUAL` 分类的 `popCode` 必须为空，由系统内部 `id` 标识。API-045 不允许客户端提交 `popCode`，API-047 也不允许修改 POP 编码。同一编码在单批文件中对应多个名称时预检失败并返回 `CATEGORY_POP_CODE_CONFLICT`；已有编码在后续批次出现不同名称时，导入不覆盖系统分类名称、状态或父级，分类信息只能通过页面维护。
 
-POP 商品资料当前只有单组“品类编码 + 品类名称”，不包含父级链路。API-067 预检必须展示类别匹配、根分类新增、新商品分类初始化和已有商品分类忽略数量，不得根据名称猜测或自动生成父级。条码首次进入本系统时，导入按 `popCode` 匹配类别；新 POP 类别以 `parentId=null` 创建为根分类并作为该商品的初始叶子分类，已有类别直接复用系统中的名称、状态和父级。条码已经存在时，无论文件类别是否变化，商品 `categoryId` 均保持不变。若新商品需要关联的 POP 类别已有子分类，该商品行返回 `PRODUCT_CATEGORY_NOT_LEAF`，整批不可提交。人工分类没有 `popCode`，不会被 POP 导入覆盖。
+POP 商品资料当前只有单组“品类编码 + 品类名称”，不包含父级链路或停用状态。API-067 预检必须展示类别匹配、根分类新增、新商品分类初始化和已有商品分类忽略数量，不得根据名称猜测或自动生成父级。条码首次进入本系统时，导入按 `popCode` 匹配类别；新 POP 类别以 `parentId=null` 创建为根分类并作为该商品的初始叶子分类，已有类别直接复用系统中的名称和父级。条码已经存在时，无论文件类别是否变化，商品 `categoryId` 均保持不变，以首次导入后保存在系统中的当前分类为准；管理员通过 API-035 修改后的分类同样不会被后续导入覆盖。若新商品需要关联的 POP 类别已有子分类，该商品行返回 `PRODUCT_CATEGORY_NOT_LEAF`，整批不可提交。人工分类没有 `popCode`，不会被 POP 导入覆盖。
 
 ### 6.3 仓库、货位和商品位置
 
@@ -222,7 +223,7 @@ MySQL 是权威数据源；Elasticsearch 索引只包含搜索和权限过滤所
 
 API-030/032 的 `keyword` 搜索使用 Elasticsearch，按条形码、商品名称、规格、供应商和分类检索；门店和角色过滤必须在服务端查询条件中执行，不能在结果返回后过滤。库存以 MySQL 为准，ES 返回商品 ID 后由后端按权限关联门店库存，避免把频繁变化的库存作为搜索索引权威值。
 
-商品与供应商为多对多；供应商只用于商品来源展示和最新进价记录，不提供供应商销售分析接口。`ProductSupplier` 只保存每个“商品 + 供应商”的 `currentPurchasePrice` 和 `purchasePriceSourceDate`，不建设历次进价表。商品资料中的有效含税成本价以资料日期、每日销售中的“当前机构最后进价”以营业日期更新对应关系；仅当来源日期不早于当前 `purchasePriceSourceDate` 时覆盖，同日以最后成功提交批次为准。每日销售进价还要保存为当日销售成本快照，后续当前进价变化不得回写该快照。普通用户响应只能包含供应商名称，不得包含任何进价；供应商主档、关系及报价变化按业务约定不写入审计日志。
+商品与供应商为多对多，但供货关系和当前进价按门店落在 `StoreProductSupplier`。每个“门店 + 商品 + 供应商”组合只保存一份 `currentPurchasePrice` 和 `purchasePriceSourceDate`，不建设历次进价表；同一商品和供应商在不同门店可以有不同当前进价。商品资料中的有效含税成本价以资料日期、每日销售中的“当前机构最后进价”以营业日期，只更新本批目标门店的对应组合；仅当来源日期不早于该组合当前 `purchasePriceSourceDate` 时覆盖，同日以最后成功提交批次为准，任何更新不得影响其他门店。每日销售进价还要保存为当日销售成本快照，后续当前进价变化不得回写该快照。供应商不作为销售分析维度；普通用户响应只能包含所属门店的供应商名称，不得包含任何进价；供应商主档、门店商品供应商关系及报价变化按业务约定不写入审计日志。
 
 当前售价归属 `StoreProduct`，不归属全局 `Product`。`ProductPublicView` 只包含当前账号所属门店的 `salePrice`；`ProductAdminView` 通过 `storePrices[{storeId,storeName,salePrice,priceSourceDate,version}]` 展示各门店当前售价。API-034/035 的 `ProductAdminWrite` 不包含全局售价；管理员使用 API-039 单独维护门店售价。API-039 不接收生效日期或来源日期，系统自动以 `Asia/Shanghai` 的操作当天写入 `priceSourceDate`，以服务器时间写入 `updatedAt`，来源类型记为 `MANUAL`；同日后发生的成功修改或导入可以继续覆盖。任何售价修改不得回写或重算历史销售事实，普通用户调用 API-039 返回 403。
 
@@ -245,7 +246,7 @@ API-035 修改条码时，新条码必须符合上述格式且全局唯一；冲
 两种模板的首版业务目标字段如下；表头仍通过映射模板按名称匹配，列顺序不固定：
 
 - 【商品资料】：`barcode, productName, unit, specification?, supplierName, purchasePrice, salePrice, inventoryQuantity, popCategoryCode, popCategoryName, remark?`。其中条码和新商品必填字段按预检规则校验，已有商品继续执行非空覆盖。
-- 【每日销售汇总】：`barcode, salesQuantity, salesRevenue, latestInventoryQuantity, currentPurchasePrice, currentSalePrice, supplierName?, salesGrossMarginRate?`。销售数量为 0 时整行舍弃；当前进价同步按“条码 + 供应商”定位关系，销售事实仍按条码聚合。
+- 【每日销售汇总】：`barcode, salesQuantity, salesRevenue, latestInventoryQuantity, currentPurchasePrice, currentSalePrice, supplierName?, salesGrossMarginRate?`。销售数量为 0 时整行舍弃；当前进价同步按“目标门店 + 条码 + 供应商”定位关系，`currentPurchasePrice` 有值时 `supplierName` 必填，销售事实仍按条码聚合。
 
 ### 7.2 映射模板
 
@@ -291,7 +292,7 @@ categorySync { matchedCategories, createdRootCategories, initializedProductCateg
 warnings[], errors[]
 ```
 
-商品资料预检只为新条码计算类别初始化结果；已有条码即使文件中的 POP 类别与系统当前分类不同，也不修改 `categoryId`，计入 `categorySync.ignoredExistingProductCategories`，不作为错误或需要确认的覆盖项。已有分类的名称、状态和父级同样不参与导入更新。
+商品资料预检只为新条码计算类别初始化结果；已有条码即使文件中的 POP 类别与系统当前分类不同，也以首次导入后保存在系统中的当前分类为准，不修改 `categoryId`，计入 `categorySync.ignoredExistingProductCategories`，不作为错误或需要确认的覆盖项。管理员在系统中修改过商品分类后规则相同。已有分类的名称、状态和父级同样不参与导入更新；POP 源端没有分类停用状态，预检不建立相应处理分支。
 
 `DAILY_SALES` 的 `businessDate` 必填，且整份文件只能对应一个营业日期，不接收 `sourceDate`。`PRODUCT` 的 `sourceDate` 必填，页面名称为“资料日期”，代表 POP 商品资料的导出数据日期，不接收 `businessDate`；两类日期都不得从文件名、上传时间或提交时间推断。商品资料导入仅限管理员，且管理员必须提交 `storeId`；普通用户导入销售时不得提交 `storeId`，服务端从当前账号绑定关系取得门店。普通用户提交非 `DAILY_SALES` 类型、伪造门店、访问其他门店批次或操作他人批次时返回 403。
 
@@ -305,13 +306,13 @@ warnings[], errors[]
 
 销售文件中的“当前机构”固定指本次批次的目标门店：管理员由 API-067 的 `storeId` 选择，普通用户由后端账号门店绑定确定。“当前机构售价”必须保存为该营业日期的销售事实快照，并参与目标门店当前售价同步。仅当 `businessDate >= priceSourceDate` 时覆盖 `StoreProduct.salePrice` 并将 `priceSourceDate` 更新为本次 `businessDate`；若日期更早，则销售事实仍可新增或修正，但当前售价跳过覆盖并在预检结果中标明。相同营业日期允许覆盖，以最后成功提交批次为准。同条码重复行的当前机构售价不一致时整批为 `INVALID`。售价快照或当前售价均不得用于反算实际销售收入。
 
-每日销售中的“当前机构最后进价”必须保存为该营业日期的历史成本快照，并参与对应商品供应商当前进价同步。仅当 `businessDate >= purchasePriceSourceDate` 时覆盖 `ProductSupplier.currentPurchasePrice` 并更新来源日期；更早的销售导入只更新历史销售事实，不回退当前进价。同日以最后成功提交批次为准。同条码、同供应商重复行的进价不一致时整批为 `INVALID`。
+每日销售中的“当前机构最后进价”必须保存为该营业日期的历史成本快照，并参与目标门店对应商品供应商当前进价同步。仅当 `businessDate >= purchasePriceSourceDate` 时覆盖该 `StoreProductSupplier.currentPurchasePrice` 并更新来源日期；更早的销售导入只更新历史销售事实，不回退当前进价，同日以最后成功提交批次为准，其他门店同商品同供应商的进价不受影响。当前进价非空时供应商必须可识别；同一目标门店内同条码、同供应商重复行的进价不一致时整批为 `INVALID`。
 
-所有【商品资料】导入均由管理员选择门店和 `sourceDate`；每个文件都按独立增量同步批次处理。这里的“条码不存在”专指新系统中尚无该条码，POP 中的商品及库存仍是完整、权威的。新系统中条码不存在时创建商品主档、以 POP 类别初始化 `categoryId`、创建商品供应商关系和门店商品关系；条码已存在时按字段合并，但不修改其 `categoryId`。有效“含税成本价”“售价”“库存数量”分别在 `sourceDate` 不早于当前进价、售价、库存来源日期时更新对应当前值。相同资料日期以最后成功提交批次为准，旧资料的成本、售价和库存均跳过覆盖并展示原因。批次未出现的商品不参与校验或更新，不清零、不停用，也不阻断提交。已有分类名称、状态和父级不由导入覆盖。该模板不是采购或实体入库，也不是进货累加，可拆分多批并重复执行。
+所有【商品资料】导入均由管理员选择门店和 `sourceDate`；每个文件都按独立增量同步批次处理。这里的“条码不存在”专指新系统中尚无该条码，POP 中的商品及库存仍是完整、权威的。新系统中条码不存在时创建商品主档、以 POP 类别初始化 `categoryId`、创建目标门店的商品供应商关系和门店商品关系；条码已存在时按字段合并，但即使导入品类发生变化也不修改其 `categoryId`。有效“含税成本价”“售价”“库存数量”分别在 `sourceDate` 不早于目标门店对应当前进价、售价、库存来源日期时更新当前值。相同资料日期以最后成功提交批次为准，旧资料的成本、售价和库存均跳过覆盖并展示原因；当前进价更新不得影响其他门店。批次未出现的商品不参与校验或更新，不清零、不停用，也不阻断提交。已有分类名称、状态和父级不由导入覆盖，POP 分类停用不属于导入场景。该模板不是采购或实体入库，也不是进货累加，可拆分多批并重复执行。
 
 商品资料已有条码的字段合并规则固定为“非空覆盖”：Excel 单元格为空时，该字段记为 `UNCHANGED` 并保留系统旧值；单元格非空且校验通过时记为 `UPDATED` 并覆盖旧值。空单元格不能用于清空系统字段；如以后需要清空，必须通过独立的显式编辑能力设计。条码本身始终必填；新商品缺少名称等必填字段时整行报错；任何非空值格式错误时均报错，不能以保留旧值代替校验。供应商单元格为空时保留现有供应商关系，不删除关系。预检变更摘要需要区分 `createdFields`、`updatedFields` 和 `unchangedBlankFields`。
 
-商品资料源列“毛利率”无论是否有值都不进入商品主档、门店商品或商品供应商关系，也不参与当前售价或当前进价计算。每日销售源列“销售毛利率”则保存到 `DailySales.salesGrossMarginRateSnapshot`，修正版按门店 + 营业日期 + 商品覆盖对应销售事实；后续商品售价或供应商进价变化不得回写该快照。
+商品资料源列“毛利率”无论是否有值都不进入商品主档、门店商品或门店商品供应商关系，也不参与当前售价或当前进价计算。每日销售源列“销售毛利率”则保存到 `DailySales.salesGrossMarginRateSnapshot`，修正版按门店 + 营业日期 + 商品覆盖对应销售事实；后续商品售价或门店供应商进价变化不得回写该快照。
 
 每日销售源列“同期|销售收入”“同期|销售数量”“同期|销售毛利率”全部忽略，不进入预检业务校验、销售事实或分析结果，也不能在系统历史不足时用于补值。
 
