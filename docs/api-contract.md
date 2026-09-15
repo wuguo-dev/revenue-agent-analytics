@@ -91,7 +91,7 @@ session: { issuedAt, idleExpiresAt, absoluteExpiresAt }
 ### ProductPublicView
 
 ```text
-id, barcode, name, suppliers[{ id, name }], specification, unit,
+id, barcode, name, supplier: { id, name } | null, specification, unit,
 categoryName, salePrice, status,
 inventory: { quantity, sourceType, sourceDate, lastSyncedAt } | null
 ```
@@ -102,7 +102,7 @@ inventory: { quantity, sourceType, sourceDate, lastSyncedAt } | null
 
 ```text
 id, barcode, name,
-storeSuppliers[{ storeId, storeName, supplierId, supplierName, currentPurchasePrice, purchasePriceSourceDate, sourceBatchId }],
+storeSupplySources[{ storeId, storeName, supplierId, supplierName, currentPurchasePrice, purchasePriceSourceDate, sourceBatchId }],
 specification, unit, category, status,
 storePrices[{ storeId, storeName, salePrice, priceSourceDate, version }],
 storeInventories[{ storeId, storeName, quantity, sourceDate, lastSyncedAt }],
@@ -184,14 +184,14 @@ M02 是账号、固定角色、门店和账号门店绑定的权威模块；M01 
 
 | ID | 方法与路径 | 权限 | 请求 | 响应 |
 |---|---|---|---|---|
-| API-030 | `GET /catalog/products` | USER_CATALOG | `keyword, supplierId, categoryId, status, page, size` | `ProductPublicView` 分页；分类包含 `id,name,status,path`，普通用户自动限定自身门店并返回该店当前售价及最新已知库存 |
-| API-031 | `GET /catalog/products/{id}` | USER_CATALOG | 路径 ID | `ProductPublicView`；分类包含停用状态，只返回所属门店当前售价及最新已知库存，不属于门店则 404 |
-| API-032 | `GET /admin/products` | ADMIN | `keyword, barcode, supplierId, categoryId, status, storeId?, page, size` | `ProductAdminView` 分页；包含当前分类、各门店当前售价及按门店拆分的供应商当前进价摘要，不默认返回销售汇总 |
-| API-033 | `GET /admin/products/{id}` | ADMIN | 路径 ID | 管理员商品详情、当前分类、各门店当前售价、各门店供应商当前进价、售价/进价来源日期及货位，不默认返回销售汇总 |
+| API-030 | `GET /catalog/products` | USER_CATALOG | `keyword, supplierId, categoryId, status, page, size` | `ProductPublicView` 分页；分类包含 `id,name,status,path`，普通用户自动限定自身门店并返回该店当前供应商、当前售价及最新已知库存 |
+| API-031 | `GET /catalog/products/{id}` | USER_CATALOG | 路径 ID | `ProductPublicView`；分类包含停用状态，只返回所属门店当前供应商、当前售价及最新已知库存，不属于门店则 404 |
+| API-032 | `GET /admin/products` | ADMIN | `keyword, barcode, supplierId, categoryId, status, storeId?, page, size` | `ProductAdminView` 分页；包含当前分类、各门店当前售价及当前供应商进价摘要，不默认返回销售汇总 |
+| API-033 | `GET /admin/products/{id}` | ADMIN | 路径 ID | 管理员商品详情、当前分类、各门店当前售价、各门店当前供应商进价、售价/进价来源日期及货位，不默认返回销售汇总 |
 | API-034 | `POST /admin/products` | ADMIN | `ProductAdminWrite`，含 `categoryId` `[G1]` | 新商品；`categoryId` 必须指向叶子分类 |
 | API-035 | `PUT /admin/products/{id}` | ADMIN | `ProductAdminWrite`，含 `barcode, categoryId, version` `[G1]` | 更新商品；允许受控修改条码，`categoryId` 必须指向叶子分类 |
 | API-036 | `PUT /admin/products/{id}/status` | ADMIN | `status` | 启用/停用，不删除历史销售 |
-| API-037 | `GET /admin/stores/{storeId}/products/{productId}/suppliers` | ADMIN | 门店 ID、商品 ID | 指定门店商品的全部供应来源记录及 `currentPurchasePrice, purchasePriceSourceDate, sourceBatchId` `[G1]`；只读且不返回其他门店或历史列表 |
+| API-037 | `GET /admin/stores/{storeId}/products/{productId}/supplier` | ADMIN | 门店 ID、商品 ID | 指定门店商品唯一的当前供应来源及 `currentPurchasePrice, purchasePriceSourceDate, sourceBatchId` `[G1]`；没有时返回 `null`，只读且不返回历史供应商 |
 
 ### 6.2 供应商与多级分类
 
@@ -235,7 +235,7 @@ MySQL 是权威数据源；Elasticsearch 索引只包含搜索和权限过滤所
 
 API-030/032 的 `keyword` 搜索使用 Elasticsearch，按条形码、商品名称、规格、供应商和分类检索；门店和角色过滤必须在服务端查询条件中执行，不能在结果返回后过滤。库存以 MySQL 为准，ES 返回商品 ID 后由后端按权限关联门店库存，避免把频繁变化的库存作为搜索索引权威值。
 
-商品与供应商为多对多，但供货来源和当前进价按门店落在 `StoreProductSupplier`。每个“门店 + 商品 + 供应商”组合只保存一份 `currentPurchasePrice`、来源日期和来源批次，不建设历次进价表，也不设置启停状态；同一商品和供应商在不同门店可以有不同当前进价。系统不提供供应商、供应关系或进价的人工写接口。商品资料和每日销售无需预建关系，直接 upsert 本批目标门店中出现的供应商组合，不比较来源日期，最后成功提交的 POP 批次覆盖当前进价；同批次多值按 Excel 原始行号取最后一个非空值，批次未出现的旧供应商记录保留。每日销售进价还要保存为当日销售成本快照，后续当前进价变化不得回写该快照。供应商不作为销售分析维度；普通用户响应包含所属门店的全部供应商名称，但不得包含任何进价；管理员可读取各门店供应商名称及当前进价。供应商及报价变化按业务约定不写入审计日志。
+每个门店商品只保留一个 `StoreProductSupplier` 当前供应来源；该记录包含供应商，因此当前进价仍按“门店 + 商品 + 当前供应商”组合保存。除组合唯一性外，数据层还必须约束“门店 + 商品”最多一条当前记录，不建设历次进价或历次供应商关系，也不设置启停状态；同一商品在不同门店可以有不同当前供应商和进价。系统不提供供应商、供应关系或进价的人工写接口。商品资料和每日销售无需预建关系：同一条形码出现非空新供应商时，新记录替换该门店商品的旧供应商记录，提交后只保留新供应商；同一文件重复条码按 Excel 原始行号最后一行决定供应商及其配套进价。商品未出现在批次中或供应商为空时保留当前供应商。每日销售进价还要保存为当日销售成本快照，后续当前进价变化不得回写该快照。供应商不作为销售分析维度；普通用户响应包含所属门店商品的当前供应商名称，但不得包含进价；管理员可读取各门店当前供应商及进价。供应商及报价变化按业务约定不写入审计日志。
 
 当前售价归属 `StoreProduct`，不归属全局 `Product`。`ProductPublicView` 只包含当前账号所属门店的 `salePrice`；`ProductAdminView` 通过 `storePrices[{storeId,storeName,salePrice,priceSourceDate,sourceBatchId,version}]` 展示各门店当前售价。API-034/035 的 `ProductAdminWrite` 不包含全局售价；当前售价只由最后成功提交的 POP 商品资料或每日销售批次更新，不提供手工售价接口。来源日期只用于追溯，不参与覆盖优先级判断。任何当前售价变化不得回写或重算历史销售事实。
 
@@ -322,11 +322,11 @@ warnings[], errors[]
 
 销售文件中的“当前机构”固定指本次批次的目标门店：管理员由 API-068 的 `storeId` 选择，普通用户由后端账号门店绑定确定。“当前机构售价”必须保存为该营业日期的销售事实快照，并参与目标门店当前售价同步。批次成功提交后直接覆盖 `StoreProduct.salePrice`，同时保存 `businessDate` 和来源批次用于追溯，不比较日期。同条码重复行售价不一致时取 Excel 原始行号最后一个非空值，不阻断批次。售价快照或当前售价均不得用于反算实际销售收入。
 
-每日销售中的“当前机构最后进价”必须保存为该营业日期的历史成本快照，并参与目标门店对应商品供应商当前进价同步。批次成功提交后直接覆盖 `StoreProductSupplier.currentPurchasePrice`，同时保存 `businessDate` 和来源批次用于追溯，不比较日期，其他门店同商品同供应商的进价不受影响。当前进价非空时供应商必须可识别；同批次同条码、同供应商多值时取 Excel 原始行号最后一个非空值，不阻断批次。
+每日销售中的“当前机构最后进价”必须保存为该营业日期的历史成本快照，并参与目标门店商品当前供应来源及进价同步。批次成功提交后，按同条码 Excel 原始行号最后一行的非空供应商及其配套进价替换该店原 `StoreProductSupplier`，同时保存 `businessDate` 和来源批次用于追溯，不比较日期，其他门店不受影响。进价非空时供应商名称必须非空；新名称无需预建或识别为既有关系。
 
-所有【商品资料】导入均由管理员选择门店和 `sourceDate`；每个文件都按独立增量同步批次处理。这里的“条码不存在”专指新系统中尚无该条码，POP 中的商品及库存仍是完整、权威的。新系统中条码不存在时创建商品主档、以 POP 类别初始化 `categoryId`、创建目标门店的门店商品关系，并按文件中的供应商名称直接 upsert 门店商品供应来源；供应商名称无需预建。条码已存在时按字段合并，但即使导入品类发生变化也不修改其 `categoryId`。有效“含税成本价”“售价”“库存数量”在批次成功提交后更新目标门店当前值，不比较 `sourceDate`；同一文件多值取 Excel 原始行号最后一个非空值，跨批次以后成功提交者胜出。当前进价更新不得影响其他门店，批次未出现的旧供应商记录继续保留。批次未出现的商品不参与校验或更新，不清零、不停用，也不阻断提交。已有分类名称、状态和父级不由导入覆盖，POP 分类停用不属于导入场景。该模板不是采购或实体入库，也不是进货累加，可拆分多批并重复执行。
+所有【商品资料】导入均由管理员选择门店和 `sourceDate`；每个文件都按独立增量同步批次处理。这里的“条码不存在”专指新系统中尚无该条码，POP 中的商品及库存仍是完整、权威的。新系统中条码不存在时创建商品主档、以 POP 类别初始化 `categoryId`、创建目标门店的门店商品关系，并以文件中该条码最后一行的非空供应商创建当前供应来源；供应商名称无需预建。条码已存在时按字段合并，但即使导入品类发生变化也不修改其 `categoryId`；非空新供应商替换本店旧供应商且提交后只保留新记录。有效“含税成本价”“售价”“库存数量”在批次成功提交后更新目标门店当前值，不比较 `sourceDate`；同一文件多值取 Excel 原始行号最后一行，跨批次以后成功提交者胜出。当前供应商和进价更新不得影响其他门店；批次未出现该商品或供应商为空时保留其当前供应商。批次未出现的商品不参与校验或更新，不清零、不停用，也不阻断提交。已有分类名称、状态和父级不由导入覆盖，POP 分类停用不属于导入场景。该模板不是采购或实体入库，也不是进货累加，可拆分多批并重复执行。
 
-商品资料已有条码的字段合并规则固定为“非空覆盖”：Excel 单元格为空时，该字段记为 `UNCHANGED` 并保留系统旧值；单元格非空且校验通过时记为 `UPDATED` 并覆盖旧值。空单元格不能用于清空系统字段；如以后需要清空，必须通过独立的显式编辑能力设计。条码本身始终必填；新商品缺少名称等必填字段时整行报错；任何非空值格式错误时均报错，不能以保留旧值代替校验。供应商名称非空时无需预建供应关系，由导入直接 upsert 对应“门店 + 商品 + 供应商”记录；供应商单元格为空或后续批次未出现原供应商时，保留目标门店已有记录，不删除关系。预检变更摘要需要区分 `createdFields`、`updatedFields` 和 `unchangedBlankFields`。
+商品资料已有条码的字段合并规则固定为“非空覆盖”：Excel 单元格为空时，该字段记为 `UNCHANGED` 并保留系统旧值；单元格非空且校验通过时记为 `UPDATED` 并覆盖旧值。空单元格不能用于清空系统字段；如以后需要清空，必须通过独立的显式编辑能力设计。条码本身始终必填；新商品缺少名称等必填字段时整行报错；任何非空值格式错误时均报错，不能以保留旧值代替校验。供应商名称非空时无需预建供应关系，直接替换目标门店商品的当前供应商；同一文件中同条码供应商不同，按 Excel 原始行号最后一行胜出并只保留该供应商。供应商单元格为空或商品未在后续批次出现时，保留目标门店当前供应商。预检变更摘要需要区分 `createdFields`、`updatedFields` 和 `unchangedBlankFields`。
 
 商品资料源列“毛利率”无论是否有值都不进入商品主档、门店商品或门店商品供应商关系，也不参与当前售价或当前进价计算。每日销售源列“销售毛利率”则保存到 `DailySales.salesGrossMarginRateSnapshot`，修正版按门店 + 营业日期 + 商品覆盖对应销售事实；后续商品售价或门店供应商进价变化不得回写该快照。
 
